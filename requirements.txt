@@ -1,0 +1,18 @@
+# Telegram Bot Framework
+aiogram==3.13.1
+
+# Database
+sqlalchemy==2.0.35
+asyncpg==0.29.0
+alembic==1.13.3
+
+# HTTP Client
+aiohttp==3.10.10
+
+# Configuration
+pydantic==2.9.2
+pydantic-settings==2.5.2
+python-dotenv==1.0.1
+
+# Logging
+python-json-logger==2.0.7

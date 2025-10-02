@@ -1,0 +1,47 @@
+# Docker Compose для локального тестирования
+version: '3.8'
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: marzban-bot-postgres
+    environment:
+      POSTGRES_USER: marzban_bot
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: marzban_bot
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U marzban_bot"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  bot:
+    build: .
+    container_name: marzban-telegram-bot
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Telegram Bot
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_ADMIN_IDS: ${TELEGRAM_ADMIN_IDS}
+
+      # Marzban API
+      MARZBAN_API_URL: ${MARZBAN_API_URL:-https://marzban.gezzy.ru}
+      MARZBAN_ADMIN_USERNAME: ${MARZBAN_ADMIN_USERNAME}
+      MARZBAN_ADMIN_PASSWORD: ${MARZBAN_ADMIN_PASSWORD}
+
+      # Database
+      DATABASE_URL: postgresql+asyncpg://marzban_bot:password@postgres:5432/marzban_bot
+
+      # Application
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
+      SUBSCRIPTION_BASE_URL: ${SUBSCRIPTION_BASE_URL:-https://marzban.gezzy.ru/sub}
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
