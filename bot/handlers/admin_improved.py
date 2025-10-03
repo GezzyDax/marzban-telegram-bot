@@ -2,6 +2,7 @@
 
 import logging
 import math
+from collections import defaultdict
 from datetime import datetime
 
 from aiogram import F, Router
@@ -13,6 +14,7 @@ from bot.database import (
     User,
     get_user_by_telegram_id,
     get_user_by_marzban_username,
+    list_user_bindings,
     create_user,
     list_users,
     search_users,
@@ -115,19 +117,23 @@ async def marzban_username_entered(
         await message.answer("❌ Username должен содержать минимум 3 символа")
         return
 
-    # Check if username already linked
-    existing = await get_user_by_marzban_username(session, marzban_username)
-    if existing:
-        await message.answer(
-            f"❌ Username <code>{marzban_username}</code> уже привязан к другому пользователю\n"
-            f"Telegram ID: <code>{existing.telegram_id}</code>",
-            parse_mode="HTML"
-        )
-        return
-
     # Get telegram_id from state
     data = await state.get_data()
     telegram_id = data.get("telegram_id")
+    if telegram_id is None:
+        await state.clear()
+        await message.answer("❌ Не удалось определить Telegram ID, начните заново", parse_mode="HTML")
+        return
+
+    # Check existing bindings for this Marzban user
+    existing_bindings = await list_user_bindings(session, marzban_username)
+    if any(binding.telegram_id == telegram_id for binding in existing_bindings):
+        await message.answer(
+            f"❌ Telegram ID <code>{telegram_id}</code> уже привязан к <code>{marzban_username}</code>",
+            parse_mode="HTML",
+        )
+        await state.clear()
+        return
 
     # Check if exists in Marzban, if not - create
     marzban_user = None
@@ -192,15 +198,34 @@ async def marzban_username_entered(
         await state.clear()
         return
 
+    existing_summary = ""
+    if existing_bindings:
+        summary_lines = []
+        for binding in existing_bindings:
+            prefix = "⭐️" if binding.primary_user else "•"
+            summary_lines.append(f"{prefix} <code>{binding.telegram_id}</code>")
+
+        existing_summary = (
+            "\n\n⚠️ <b>Текущие привязки:</b>\n"
+            + "\n".join(summary_lines)
+            + "\n➕ Новый Telegram ID будет добавлен как дополнительный."
+        )
+    else:
+        existing_summary = "\n\n⭐️ Это будет основная привязка для пользователя."
+
     # Store and ask for confirmation
-    await state.update_data(marzban_username=marzban_username)
+    await state.update_data(
+        marzban_username=marzban_username,
+        has_existing_bindings=bool(existing_bindings),
+    )
     await state.set_state(AddUserStates.waiting_for_confirmation)
 
     await message.answer(
         f"✅ <b>Подтвердите добавление:</b>\n\n"
         f"Telegram ID: <code>{telegram_id}</code>\n"
         f"Marzban username: <code>{marzban_username}</code>\n"
-        f"Статус в Marzban: <b>{marzban_user.status.upper()}</b>",
+        f"Статус в Marzban: <b>{marzban_user.status.upper()}</b>"
+        f"{existing_summary}",
         reply_markup=get_confirmation_inline("confirm_add_user"),
         parse_mode="HTML"
     )
@@ -217,13 +242,44 @@ async def confirm_add_user(callback: CallbackQuery, state: FSMContext, session: 
     telegram_id = data["telegram_id"]
     marzban_username = data["marzban_username"]
 
-    await create_user(session, telegram_id, marzban_username)
-    await log_admin_action(session, callback.from_user.id, "add_user", marzban_username, f"tg: {telegram_id}")
+    try:
+        new_user = await create_user(session, telegram_id, marzban_username)
+    except ValueError as error:
+        await callback.answer(f"❌ {error}", show_alert=True)
+        return
+
+    await log_admin_action(
+        session,
+        callback.from_user.id,
+        "add_user",
+        marzban_username,
+        f"tg: {telegram_id}, primary={new_user.primary_user}",
+    )
+
+    bindings = await list_user_bindings(session, marzban_username)
+    bindings_lines = []
+    for binding in bindings:
+        badge = "⭐️" if binding.primary_user else "•"
+        bindings_lines.append(f"{badge} <code>{binding.telegram_id}</code>")
+
+    role_note = (
+        "⭐️ Назначен основным Telegram-аккаунтом."
+        if new_user.primary_user
+        else "➕ Добавлен как дополнительный Telegram-аккаунт."
+    )
+
+    bindings_block = (
+        "\n\n📌 <b>Актуальные привязки:</b>\n" + "\n".join(bindings_lines)
+        if bindings_lines
+        else ""
+    )
 
     await callback.message.edit_text(
         f"✅ <b>Пользователь успешно добавлен!</b>\n\n"
         f"Telegram ID: <code>{telegram_id}</code>\n"
-        f"Marzban username: <code>{marzban_username}</code>\n\n"
+        f"Marzban username: <code>{marzban_username}</code>\n"
+        f"{role_note}"
+        f"{bindings_block}\n\n"
         "Пользователь может начать работу с ботом командой /start",
         parse_mode="HTML"
     )
@@ -262,7 +318,9 @@ async def list_all_users(callback: CallbackQuery, is_admin: bool, session: Async
 
         # Get bot DB users
         db_users, db_total = await list_users(session, offset=0, limit=1000)
-        db_users_dict = {u.marzban_username: u for u in db_users}
+        db_users_map: dict[str, list[User]] = defaultdict(list)
+        for db_user in db_users:
+            db_users_map[db_user.marzban_username].append(db_user)
         logger.info(f"Got {db_total} users from bot database")
 
         total_pages = math.ceil(marzban_total / page_size) if marzban_total > 0 else 1
@@ -287,13 +345,16 @@ async def list_all_users(callback: CallbackQuery, is_admin: bool, session: Async
                 used = marzban_user_data.get('used_traffic', 0)
 
                 # Check if in bot DB
-                in_bot = "✅" if username in db_users_dict else "❌"
+                bindings = db_users_map.get(username, [])
+                in_bot = "✅" if bindings else "❌"
 
-                # Admin badge
-                admin_badge = "👑 " if username in db_users_dict and db_users_dict[username].is_admin else ""
+                # Admin badge if any binding has admin flag
+                admin_badge = "👑 " if any(binding.is_admin for binding in bindings) else ""
+
+                bindings_hint = f" ({len(bindings)} TG)" if len(bindings) > 1 else ""
 
                 text += (
-                    f"{i}. {admin_badge}<b>{username}</b> {in_bot}\n"
+                    f"{i}. {admin_badge}<b>{username}</b> {in_bot}{bindings_hint}\n"
                     f"   ├ Статус: {status}\n"
                     f"   └ Использовано: {format_bytes(used)}\n\n"
                 )
@@ -367,8 +428,10 @@ async def search_query(message: Message, state: FSMContext, session: AsyncSessio
         text += f"<b>📊 В базе бота ({len(db_users)}):</b>\n\n"
         for user in db_users:
             admin_badge = "👑 " if user.is_admin else ""
+            role_label = "⭐️ Основной" if user.primary_user else "➕ Дополнительный"
             text += (
                 f"{admin_badge}<b>{user.marzban_username}</b>\n"
+                f"├ Роль: {role_label}\n"
                 f"├ TG ID: <code>{user.telegram_id}</code>\n"
                 f"└ Создан: {user.created_at.strftime('%d.%m.%Y')}\n\n"
             )
