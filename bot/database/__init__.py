@@ -4,6 +4,7 @@ from .models import Base, User, AdminLog, NotificationSettings, SentNotification
 from .crud import (
     get_user_by_telegram_id,
     get_user_by_marzban_username,
+    list_user_bindings,
     create_user,
     delete_user,
     list_users,
@@ -25,6 +26,7 @@ __all__ = [
     "SentNotifications",
     "get_user_by_telegram_id",
     "get_user_by_marzban_username",
+    "list_user_bindings",
     "create_user",
     "delete_user",
     "list_users",
