@@ -130,16 +130,14 @@ async def marzban_username_entered(
     telegram_id = data.get("telegram_id")
 
     # Check if exists in Marzban, if not - create
-    user_exists = False
+    marzban_user = None
     try:
         marzban_user = await marzban.get_user(marzban_username)
-        user_exists = True
-        logger.info(f"User {marzban_username} found in Marzban")
-    except MarzbanAPIError:
-        # User not found, will create
-        logger.info(f"User {marzban_username} not found in Marzban, will create")
+        logger.info(f"User {marzban_username} found in Marzban (status: {marzban_user.status})")
+    except MarzbanAPIError as e:
+        # User not found, try to create
+        logger.info(f"User {marzban_username} not found in Marzban, attempting to create")
 
-    if not user_exists:
         try:
             await message.answer(
                 f"⏳ Пользователь <code>{marzban_username}</code> не найден в Marzban\n"
@@ -159,14 +157,40 @@ async def marzban_username_entered(
             )
             logger.info(f"Successfully created user {marzban_username} in Marzban")
 
-        except MarzbanAPIError as e:
-            logger.error(f"Failed to create user in Marzban: {e}", exc_info=True)
-            await message.answer(
-                f"❌ Не удалось создать пользователя в Marzban:\n{str(e)}",
-                parse_mode="HTML"
-            )
-            await state.clear()
-            return
+        except MarzbanAPIError as create_error:
+            # Check if error is "already exists" (409)
+            if "already exists" in str(create_error).lower() or "409" in str(create_error):
+                logger.warning(f"User {marzban_username} already exists (race condition), fetching...")
+                # User was created between our check and creation attempt, fetch it
+                try:
+                    marzban_user = await marzban.get_user(marzban_username)
+                    logger.info(f"Successfully fetched existing user {marzban_username}")
+                except MarzbanAPIError as fetch_error:
+                    logger.error(f"Failed to fetch user after 409: {fetch_error}", exc_info=True)
+                    await message.answer(
+                        f"❌ Ошибка: пользователь существует в Marzban, но не удалось получить его данные",
+                        parse_mode="HTML"
+                    )
+                    await state.clear()
+                    return
+            else:
+                logger.error(f"Failed to create user in Marzban: {create_error}", exc_info=True)
+                await message.answer(
+                    f"❌ Не удалось создать пользователя в Marzban:\n{str(create_error)}",
+                    parse_mode="HTML"
+                )
+                await state.clear()
+                return
+
+    # Safety check
+    if marzban_user is None:
+        logger.error(f"marzban_user is None after all attempts for {marzban_username}")
+        await message.answer(
+            "❌ Не удалось получить данные пользователя из Marzban",
+            parse_mode="HTML"
+        )
+        await state.clear()
+        return
 
     # Store and ask for confirmation
     await state.update_data(marzban_username=marzban_username)
@@ -226,13 +250,22 @@ async def list_all_users(callback: CallbackQuery, is_admin: bool, session: Async
 
     try:
         # Get Marzban users
+        logger.info(f"Fetching Marzban users list (offset={offset}, limit={page_size})")
         marzban_users_list, marzban_total = await marzban.list_users(offset=offset, limit=page_size)
+
+        if marzban_users_list is None:
+            logger.error("marzban.list_users() returned None for users list")
+            await callback.answer("❌ Marzban API вернул пустой ответ", show_alert=True)
+            return
+
+        logger.info(f"Got {len(marzban_users_list)} users from Marzban (total: {marzban_total})")
 
         # Get bot DB users
         db_users, db_total = await list_users(session, offset=0, limit=1000)
         db_users_dict = {u.marzban_username: u for u in db_users}
+        logger.info(f"Got {db_total} users from bot database")
 
-        total_pages = math.ceil(marzban_total / page_size)
+        total_pages = math.ceil(marzban_total / page_size) if marzban_total > 0 else 1
 
         text = (
             f"📋 <b>Список пользователей Marzban</b>\n"
@@ -241,24 +274,31 @@ async def list_all_users(callback: CallbackQuery, is_admin: bool, session: Async
             f"Зарегистрировано в боте: <b>{db_total}</b>\n\n"
         )
 
-        for i, marzban_user_data in enumerate(marzban_users_list, start=offset + 1):
-            username = marzban_user_data.get('username', 'unknown')
-            status = marzban_user_data.get('status', 'unknown')
-            used = marzban_user_data.get('used_traffic', 0)
+        if not marzban_users_list:
+            text += "📭 Пользователей не найдено на этой странице"
+        else:
+            for i, marzban_user_data in enumerate(marzban_users_list, start=offset + 1):
+                if not isinstance(marzban_user_data, dict):
+                    logger.warning(f"Invalid user data format at index {i}: {type(marzban_user_data)}")
+                    continue
 
-            # Check if in bot DB
-            in_bot = "✅" if username in db_users_dict else "❌"
+                username = marzban_user_data.get('username', 'unknown')
+                status = marzban_user_data.get('status', 'unknown')
+                used = marzban_user_data.get('used_traffic', 0)
 
-            # Admin badge
-            admin_badge = "👑 " if username in db_users_dict and db_users_dict[username].is_admin else ""
+                # Check if in bot DB
+                in_bot = "✅" if username in db_users_dict else "❌"
 
-            text += (
-                f"{i}. {admin_badge}<b>{username}</b> {in_bot}\n"
-                f"   ├ Статус: {status}\n"
-                f"   └ Использовано: {format_bytes(used)}\n\n"
-            )
+                # Admin badge
+                admin_badge = "👑 " if username in db_users_dict and db_users_dict[username].is_admin else ""
 
-        text += "\n✅ - в боте | ❌ - не в боте"
+                text += (
+                    f"{i}. {admin_badge}<b>{username}</b> {in_bot}\n"
+                    f"   ├ Статус: {status}\n"
+                    f"   └ Использовано: {format_bytes(used)}\n\n"
+                )
+
+            text += "\n✅ - в боте | ❌ - не в боте"
 
         await callback.message.edit_text(
             text,
@@ -267,8 +307,11 @@ async def list_all_users(callback: CallbackQuery, is_admin: bool, session: Async
         )
         await callback.answer()
 
+    except MarzbanAPIError as e:
+        logger.error(f"Marzban API error while listing users: {e}", exc_info=True)
+        await callback.answer(f"❌ Ошибка Marzban API: {str(e)}", show_alert=True)
     except Exception as e:
-        logger.error(f"Failed to list users: {e}", exc_info=True)
+        logger.error(f"Unexpected error while listing users: {e}", exc_info=True)
         await callback.answer("❌ Не удалось получить список пользователей", show_alert=True)
 
 
@@ -354,25 +397,35 @@ async def show_advanced_stats(callback: CallbackQuery, is_admin: bool, session: 
 
     try:
         # Get bot users
+        logger.info("Fetching bot database users for statistics")
         db_users, db_total = await list_users(session, limit=1000)
         db_admins = sum(1 for u in db_users if u.is_admin)
+        logger.info(f"Bot DB: {db_total} users ({db_admins} admins)")
 
         # Get Marzban stats
+        logger.info("Fetching Marzban users for statistics")
         marzban_users_list, marzban_total = await marzban.list_users(offset=0, limit=1000)
 
+        if marzban_users_list is None:
+            logger.error("marzban.list_users() returned None in statistics")
+            marzban_users_list = []
+            marzban_total = 0
+
+        logger.info(f"Marzban API: {marzban_total} users ({len(marzban_users_list)} fetched)")
+
         # Calculate Marzban stats
-        active_users = sum(1 for u in marzban_users_list if u.get('status') == 'active')
-        disabled_users = sum(1 for u in marzban_users_list if u.get('status') == 'disabled')
-        limited_users = sum(1 for u in marzban_users_list if u.get('status') == 'limited')
-        expired_users = sum(1 for u in marzban_users_list if u.get('status') == 'expired')
+        active_users = sum(1 for u in marzban_users_list if isinstance(u, dict) and u.get('status') == 'active')
+        disabled_users = sum(1 for u in marzban_users_list if isinstance(u, dict) and u.get('status') == 'disabled')
+        limited_users = sum(1 for u in marzban_users_list if isinstance(u, dict) and u.get('status') == 'limited')
+        expired_users = sum(1 for u in marzban_users_list if isinstance(u, dict) and u.get('status') == 'expired')
 
         # Calculate total traffic
-        total_traffic = sum(u.get('used_traffic', 0) for u in marzban_users_list)
+        total_traffic = sum(u.get('used_traffic', 0) for u in marzban_users_list if isinstance(u, dict))
 
         # Calculate online users (активность за последние 5 минут)
         now = datetime.now().timestamp()
         online_users = sum(1 for u in marzban_users_list
-                          if u.get('online_at') and (now - u.get('online_at')) < 300)
+                          if isinstance(u, dict) and u.get('online_at') and (now - u.get('online_at')) < 300)
 
         text = (
             "📊 <b>Расширенная статистика</b>\n\n"
