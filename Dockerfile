@@ -17,21 +17,20 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Copy Python dependencies from builder
-COPY --from=builder /root/.local /root/.local
+# Create non-root user first
+RUN useradd -m -u 1000 botuser
+
+# Copy Python dependencies from builder to botuser home
+COPY --from=builder --chown=botuser:botuser /root/.local /home/botuser/.local
 
 # Copy application code
-COPY bot/ ./bot/
-
-# Create non-root user
-RUN useradd -m -u 1000 botuser && \
-    chown -R botuser:botuser /app
+COPY --chown=botuser:botuser bot/ ./bot/
 
 # Switch to non-root user
 USER botuser
 
-# Update PATH
-ENV PATH=/root/.local/bin:$PATH
+# Update PATH to use botuser's local packages
+ENV PATH=/home/botuser/.local/bin:$PATH
 
 # Run the bot
 CMD ["python", "-m", "bot.main"]
