@@ -13,7 +13,7 @@ from bot.database import (
     create_user,
     delete_user,
     get_user_by_telegram_id,
-    get_user_by_marzban_username,
+    list_user_bindings,
     list_users,
     update_user_admin_status,
     log_admin_action,
@@ -120,12 +120,12 @@ async def cmd_add_user(message: Message, session: AsyncSession, marzban: Marzban
         )
         return
 
-    # Check if marzban username already linked
-    existing_marzban = await get_user_by_marzban_username(session, marzban_username)
-    if existing_marzban:
+    # Check existing bindings for Marzban user
+    bindings = await list_user_bindings(session, marzban_username)
+
+    if any(binding.telegram_id == telegram_id for binding in bindings):
         await message.answer(
-            f"❌ Marzban username <code>{marzban_username}</code> уже привязан\n"
-            f"Telegram ID: <code>{existing_marzban.telegram_id}</code>",
+            f"❌ Telegram ID <code>{telegram_id}</code> уже привязан к <code>{marzban_username}</code>",
             parse_mode="HTML",
         )
         return
@@ -142,7 +142,11 @@ async def cmd_add_user(message: Message, session: AsyncSession, marzban: Marzban
         return
 
     # Create user
-    user = await create_user(session, telegram_id, marzban_username)
+    try:
+        user = await create_user(session, telegram_id, marzban_username)
+    except ValueError as error:
+        await message.answer(f"❌ {error}")
+        return
 
     # Log action
     await log_admin_action(
@@ -150,13 +154,33 @@ async def cmd_add_user(message: Message, session: AsyncSession, marzban: Marzban
         message.from_user.id,
         "add_user",
         marzban_username,
-        f"telegram_id: {telegram_id}",
+        f"telegram_id: {telegram_id}, primary={user.primary_user}",
+    )
+
+    bindings = await list_user_bindings(session, marzban_username)
+    bindings_lines = []
+    for binding in bindings:
+        badge = "⭐️" if binding.primary_user else "•"
+        bindings_lines.append(f"{badge} <code>{binding.telegram_id}</code>")
+
+    role_note = (
+        "⭐️ Назначен основным Telegram-аккаунтом."
+        if user.primary_user
+        else "➕ Добавлен как дополнительный Telegram-аккаунт."
+    )
+
+    bindings_block = (
+        "\n\n📌 <b>Актуальные привязки:</b>\n" + "\n".join(bindings_lines)
+        if bindings_lines
+        else ""
     )
 
     await message.answer(
         f"✅ <b>Пользователь успешно добавлен</b>\n\n"
         f"Telegram ID: <code>{telegram_id}</code>\n"
-        f"Marzban username: <code>{marzban_username}</code>\n\n"
+        f"Marzban username: <code>{marzban_username}</code>\n"
+        f"{role_note}"
+        f"{bindings_block}\n\n"
         "Пользователь может начать работу с ботом командой /start",
         parse_mode="HTML",
     )
@@ -330,8 +354,10 @@ async def show_user_list(callback: CallbackQuery, session: AsyncSession, **kwarg
 
     for i, user in enumerate(users, start=offset + 1):
         admin_badge = "👑 " if user.is_admin else ""
+        role_label = "⭐️ Основной" if user.primary_user else "➕ Дополнительный"
         text += (
             f"{i}. {admin_badge}<b>{user.marzban_username}</b>\n"
+            f"   ├ Роль: {role_label}\n"
             f"   ├ TG ID: <code>{user.telegram_id}</code>\n"
             f"   └ Создан: {user.created_at.strftime('%d.%m.%Y')}\n\n"
         )
@@ -351,11 +377,17 @@ async def show_stats(callback: CallbackQuery, session: AsyncSession, marzban: Ma
     try:
         users, total = await list_users(session, limit=1000)
 
+        admin_count = sum(1 for u in users if u.is_admin)
+        primary_count = sum(1 for u in users if u.primary_user)
+        secondary_count = total - primary_count
+
         text = (
             "📊 <b>Статистика системы</b>\n\n"
-            f"👥 Всего пользователей: <b>{total}</b>\n"
-            f"👑 Администраторов: <b>{sum(1 for u in users if u.is_admin)}</b>\n"
-            f"👤 Обычных пользователей: <b>{sum(1 for u in users if not u.is_admin)}</b>\n"
+            f"👥 Всего привязок: <b>{total}</b>\n"
+            f"⭐️ Основных аккаунтов: <b>{primary_count}</b>\n"
+            f"➕ Дополнительных аккаунтов: <b>{secondary_count}</b>\n"
+            f"👑 Администраторов: <b>{admin_count}</b>\n"
+            f"👤 Обычных пользователей: <b>{total - admin_count}</b>\n"
         )
 
         await callback.message.edit_text(
