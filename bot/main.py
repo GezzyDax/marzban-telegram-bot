@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from bot.config import settings
 from bot.database.models import Base
-from bot.handlers.simple import router as simple_router
+from bot.handlers.new_handlers import router as user_router
+from bot.handlers.admin_improved import router as admin_router
 from bot.middleware import AuthMiddleware, DatabaseMiddleware
 from bot.services import MarzbanAPI
 
@@ -76,8 +77,9 @@ async def main():
 
     dp.update.middleware.register(marzban_middleware)
 
-    # Register simplified router
-    dp.include_router(simple_router)
+    # Register routers (new improved handlers)
+    dp.include_router(user_router)
+    dp.include_router(admin_router)
 
     logger.info("Bot configuration complete")
     logger.info(f"Admin IDs: {settings.admin_ids}")
