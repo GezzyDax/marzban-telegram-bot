@@ -30,6 +30,10 @@ COPY --from=builder --chown=botuser:botuser /root/.local /home/botuser/.local
 # Copy application code
 COPY --chown=botuser:botuser bot/ ./bot/
 
+# Copy Alembic migrations
+COPY --chown=botuser:botuser alembic/ ./alembic/
+COPY --chown=botuser:botuser alembic.ini ./
+
 # Create version file
 RUN echo "${VERSION}" > /app/VERSION
 
