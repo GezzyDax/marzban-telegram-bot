@@ -2,7 +2,7 @@
 
 from typing import Optional
 
-from sqlalchemy import desc, select, func
+from sqlalchemy import asc, desc, select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from .models import AdminLog, User
@@ -14,10 +14,27 @@ async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> Op
     return result.scalar_one_or_none()
 
 
-async def get_user_by_marzban_username(session: AsyncSession, marzban_username: str) -> Optional[User]:
-    """Get user by Marzban username"""
-    result = await session.execute(select(User).where(User.marzban_username == marzban_username))
-    return result.scalar_one_or_none()
+async def get_user_by_marzban_username(
+    session: AsyncSession, marzban_username: str, *, primary_only: bool = True
+) -> Optional[User]:
+    """Get user by Marzban username (primary binding by default)"""
+    query = select(User).where(User.marzban_username == marzban_username)
+    if primary_only:
+        query = query.where(User.primary_user.is_(True))
+
+    query = query.order_by(desc(User.created_at))
+    result = await session.execute(query)
+    return result.scalars().first()
+
+
+async def list_user_bindings(session: AsyncSession, marzban_username: str) -> list[User]:
+    """List all Telegram bindings for a Marzban username"""
+    result = await session.execute(
+        select(User)
+        .where(User.marzban_username == marzban_username)
+        .order_by(desc(User.primary_user), desc(User.created_at))
+    )
+    return list(result.scalars().all())
 
 
 async def create_user(
@@ -25,12 +42,28 @@ async def create_user(
     telegram_id: int,
     marzban_username: str,
     is_admin: bool = False,
+    primary_user: Optional[bool] = None,
 ) -> User:
     """Create new user"""
+    existing_by_telegram = await get_user_by_telegram_id(session, telegram_id)
+    if existing_by_telegram:
+        raise ValueError(f"Telegram ID {telegram_id} is already linked to {existing_by_telegram.marzban_username}")
+
+    existing_primary = await get_user_by_marzban_username(
+        session, marzban_username, primary_only=True
+    )
+
+    if primary_user is None:
+        primary_user = existing_primary is None
+
+    if primary_user and existing_primary:
+        existing_primary.primary_user = False
+
     user = User(
         telegram_id=telegram_id,
         marzban_username=marzban_username,
         is_admin=is_admin,
+        primary_user=primary_user,
     )
     session.add(user)
     await session.commit()
@@ -42,7 +75,23 @@ async def delete_user(session: AsyncSession, telegram_id: int) -> bool:
     """Delete user by Telegram ID"""
     user = await get_user_by_telegram_id(session, telegram_id)
     if user:
+        marzban_username = user.marzban_username
+        was_primary = user.primary_user
+
         await session.delete(user)
+        await session.flush()
+
+        if was_primary:
+            replacement_result = await session.execute(
+                select(User)
+                .where(User.marzban_username == marzban_username)
+                .order_by(desc(User.primary_user), asc(User.created_at))
+                .limit(1)
+            )
+            replacement = replacement_result.scalars().first()
+            if replacement and not replacement.primary_user:
+                replacement.primary_user = True
+
         await session.commit()
         return True
     return False
