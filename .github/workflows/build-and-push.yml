@@ -3,6 +3,7 @@ name: Build and Push Docker Image to Harbor
 on:
   push:
     branches:
+      - dev
       - main
     tags:
       - 'v*'
@@ -13,23 +14,74 @@ env:
   IMAGE_NAME: apps/marzban-telegram-bot
 
 jobs:
+  # Semantic Release - только для main
+  semantic-release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      new_release_published: ${{ steps.semantic.outputs.new_release_published }}
+      new_release_version: ${{ steps.semantic.outputs.new_release_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install semantic-release
+        run: |
+          npm install -g \
+            semantic-release \
+            @semantic-release/changelog \
+            @semantic-release/git \
+            @semantic-release/github \
+            conventional-changelog-conventionalcommits
+
+      - name: Run Semantic Release
+        id: semantic
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
+
   build-and-push:
     runs-on: ubuntu-latest
+    needs: [semantic-release]
+    if: always()
     permissions:
       contents: read
       packages: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # Full history for git describe
+          fetch-depth: 0
 
-      - name: Generate version
+      - name: Determine version
         id: version
         run: |
-          # Try to get version from git tags
-          VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v0.1.0-dev")
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            if [ "${{ needs.semantic-release.outputs.new_release_published }}" == "true" ]; then
+              VERSION="v${{ needs.semantic-release.outputs.new_release_version }}"
+            else
+              VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v0.1.0")
+            fi
+          elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+            VERSION="dev-$(git rev-parse --short HEAD)"
+          else
+            VERSION=$(git describe --tags --always --dirty 2>/dev/null || echo "v0.1.0-dev")
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Generated version: $VERSION"
 
@@ -37,37 +89,135 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Harbor
-        if: github.event_name != 'pull_request'
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ secrets.HARBOR_USERNAME }}
           password: ${{ secrets.HARBOR_PASSWORD }}
 
-      - name: Extract metadata (tags, labels)
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}}
-            type=semver,pattern={{major}}.{{minor}}
-            type=sha,prefix={{branch}}-,enable=${{ github.event_name != 'pull_request' }}
-            type=raw,value=latest,enable={{is_default_branch}}
+      - name: Determine Docker tags
+        id: docker_tags
+        run: |
+          TAGS="${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.version }}"
+
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest"
+          elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+            TAGS="${TAGS},${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:dev"
+          fi
+
+          echo "tags=${TAGS}" >> $GITHUB_OUTPUT
+          echo "Docker tags: ${TAGS}"
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v5
         with:
           context: .
           push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.docker_tags.outputs.tags }}
           build-args: |
             VERSION=${{ steps.version.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Image digest
-        run: echo "Image pushed with digest ${{ steps.meta.outputs.digest }}"
+        run: echo "Image pushed with tags ${{ steps.docker_tags.outputs.tags }}"
+
+  smoke-test:
+    runs-on: ubuntu-latest
+    needs: [build-and-push]
+    permissions:
+      contents: read
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Log in to Harbor
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.HARBOR_USERNAME }}
+          password: ${{ secrets.HARBOR_PASSWORD }}
+
+      - name: Determine test tag
+        id: test_tag
+        run: |
+          if [ "${{ github.ref }}" == "refs/heads/main" ]; then
+            TAG="latest"
+          elif [ "${{ github.ref }}" == "refs/heads/dev" ]; then
+            TAG="dev"
+          else
+            TAG="latest"
+          fi
+          echo "tag=${TAG}" >> $GITHUB_OUTPUT
+          echo "Testing with tag: ${TAG}"
+
+      - name: Run smoke test
+        run: |
+          chmod +x tests/smoke-test.sh
+          bash tests/smoke-test.sh ${{ steps.test_tag.outputs.tag }}
+
+  update-gitops:
+    if: github.ref == 'refs/heads/main' && needs.semantic-release.outputs.new_release_published == 'true'
+    runs-on: ubuntu-latest
+    needs: [semantic-release, build-and-push, smoke-test]
+    permissions:
+      contents: read
+
+    steps:
+      - name: Setup SSH for Forgejo
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.FORGEJO_SSH_KEY }}" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -p 22 ssh.git.gezzy.ru >> ~/.ssh/known_hosts
+
+      - name: Clone GitOps repository
+        run: |
+          git clone ssh://git@ssh.git.gezzy.ru/Gezzy/marzban-bot-k8s.git gitops
+          cd gitops
+          git config user.name "${{ secrets.FORGEJO_GIT_USER }}"
+          git config user.email "github-actions@gezzy.ru"
+
+      - name: Update image tag in values.yaml
+        run: |
+          cd gitops
+          NEW_VERSION="v${{ needs.semantic-release.outputs.new_release_version }}"
+
+          # Update values/marzban-bot-values-safe.yaml
+          sed -i "s|tag:.*|tag: ${NEW_VERSION}|g" values/marzban-bot-values-safe.yaml
+
+          # Show changes
+          git diff values/marzban-bot-values-safe.yaml
+
+          # Commit and push
+          git add values/marzban-bot-values-safe.yaml
+          git commit -m "chore: update bot image to ${NEW_VERSION}" \
+                     -m "Automated update from GitHub Actions" \
+                     -m "Source: https://github.com/GezzyDax/marzban-telegram-bot/releases/tag/${NEW_VERSION}" || echo "No changes to commit"
+
+          git push origin main
+
+      - name: GitOps update complete
+        run: |
+          echo "✅ GitOps repository updated with version v${{ needs.semantic-release.outputs.new_release_version }}"
+          echo "🔄 ArgoCD will automatically sync the changes"
+
+      - name: Cleanup SSH
+        if: always()
+        run: rm -rf ~/.ssh/id_rsa
