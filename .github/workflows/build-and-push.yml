@@ -50,7 +50,19 @@ jobs:
         id: semantic
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npx semantic-release
+        run: |
+          npx semantic-release 2>&1 | tee semantic-release.log
+
+          # Parse semantic-release output to set job outputs
+          if grep -q "Published release" semantic-release.log; then
+            echo "new_release_published=true" >> $GITHUB_OUTPUT
+            VERSION=$(grep "Published release" semantic-release.log | grep -oP '\d+\.\d+\.\d+' | head -1)
+            echo "new_release_version=${VERSION}" >> $GITHUB_OUTPUT
+            echo "✅ New release published: ${VERSION}"
+          else
+            echo "new_release_published=false" >> $GITHUB_OUTPUT
+            echo "ℹ️  No new release published"
+          fi
 
   build-and-push:
     runs-on: ubuntu-latest
