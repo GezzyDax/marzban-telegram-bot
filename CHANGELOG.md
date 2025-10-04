@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.0...v1.0.1) (2025-10-04)
+
+### Bug Fixes
+
+* correct GitOps values file path and tag format ([7682d82](https://github.com/GezzyDax/marzban-telegram-bot/commit/7682d82b9ec554a9796e585698565a7dd5878b2d))
+* smoke test database connection in CI/CD ([df75561](https://github.com/GezzyDax/marzban-telegram-bot/commit/df75561a5c240ce3847c820bdc2df44dbb5b125d))
+
 ## 1.0.0 (2025-10-04)
 
 ### Features
