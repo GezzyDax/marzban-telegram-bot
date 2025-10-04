@@ -17,6 +17,10 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# Version argument from build
+ARG VERSION=unknown
+ENV BOT_VERSION=${VERSION}
+
 # Create non-root user first
 RUN useradd -m -u 1000 botuser
 
@@ -25,6 +29,9 @@ COPY --from=builder --chown=botuser:botuser /root/.local /home/botuser/.local
 
 # Copy application code
 COPY --chown=botuser:botuser bot/ ./bot/
+
+# Create version file
+RUN echo "${VERSION}" > /app/VERSION
 
 # Switch to non-root user
 USER botuser

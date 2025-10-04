@@ -10,6 +10,7 @@ def get_admin_main_menu_extended() -> InlineKeyboardMarkup:
         [InlineKeyboardButton(text="👑 Управление правами", callback_data="admin_permissions_menu")],
         [InlineKeyboardButton(text="📊 Статистика и отчёты", callback_data="admin_stats_menu")],
         [InlineKeyboardButton(text="⚙️ Настройки", callback_data="admin_settings_menu")],
+        [InlineKeyboardButton(text="ℹ️ О боте", callback_data="admin_about")],
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
 

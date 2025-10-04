@@ -538,6 +538,33 @@ async def cancel_action(callback: CallbackQuery, state: FSMContext, is_admin: bo
     await callback.answer()
 
 
+# ============= ADMIN: ABOUT BOT =============
+@router.callback_query(F.data == "admin_about")
+async def show_about(callback: CallbackQuery, is_admin: bool):
+    """Show bot version and info"""
+    if not is_admin:
+        await callback.answer("❌ Доступ запрещён", show_alert=True)
+        return
+
+    from bot.version import __version__
+
+    text = (
+        f"ℹ️ <b>О боте</b>\n\n"
+        f"📦 <b>Версия:</b> <code>{__version__}</code>\n"
+        f"🤖 <b>Название:</b> Marzban Telegram Bot\n"
+        f"📝 <b>Описание:</b> Бот для управления доступом к VPN через Marzban панель\n\n"
+        f"🔗 <b>GitHub:</b> https://github.com/GezzyDax/marzban-telegram-bot"
+    )
+
+    await callback.message.edit_text(
+        text,
+        reply_markup=get_back_to_admin_menu(),
+        parse_mode="HTML",
+        disable_web_page_preview=True
+    )
+    await callback.answer()
+
+
 # No-op handler for pagination display
 @router.callback_query(F.data == "noop")
 async def noop_handler(callback: CallbackQuery):
