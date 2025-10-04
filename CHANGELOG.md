@@ -1,3 +1,9 @@
+## [1.0.2](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.1...v1.0.2) (2025-10-04)
+
+### Bug Fixes
+
+* improve smoke test to handle Telegram token validation ([92fcd8f](https://github.com/GezzyDax/marzban-telegram-bot/commit/92fcd8fa58d00baf34ff586e3f31fc25c131619d))
+
 ## [1.0.1](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.0...v1.0.1) (2025-10-04)
 
 ### Bug Fixes
