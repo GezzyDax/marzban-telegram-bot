@@ -167,6 +167,11 @@ jobs:
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "Testing with tag: ${TAG}"
 
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
       - name: Run smoke test
         run: |
           chmod +x tests/smoke-test.sh
