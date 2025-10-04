@@ -1,3 +1,9 @@
+## [1.0.3](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.2...v1.0.3) (2025-10-04)
+
+### Bug Fixes
+
+* set semantic-release job outputs for GitOps update ([12ba884](https://github.com/GezzyDax/marzban-telegram-bot/commit/12ba8843302fcccb05db814a9f1cb04bb892b36d))
+
 ## [1.0.2](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.1...v1.0.2) (2025-10-04)
 
 ### Bug Fixes
