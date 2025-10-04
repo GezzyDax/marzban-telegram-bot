@@ -71,3 +71,19 @@ def get_confirmation_keyboard(confirm_data: str, cancel_data: str = "fsm_cancel"
         ]
     ]
     return InlineKeyboardMarkup(inline_keyboard=buttons)
+
+
+def get_user_search_result_keyboard(telegram_id: int, current_status: str) -> InlineKeyboardMarkup:
+    """Keyboard for user search result with status toggle"""
+    # Determine toggle button text based on current status
+    if current_status == "active":
+        status_button_text = "🔴 Отключить"
+        status_button_data = f"toggle_status:{telegram_id}:disabled"
+    else:
+        status_button_text = "🟢 Включить"
+        status_button_data = f"toggle_status:{telegram_id}:active"
+
+    buttons = [
+        [InlineKeyboardButton(text=status_button_text, callback_data=status_button_data)],
+    ]
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
