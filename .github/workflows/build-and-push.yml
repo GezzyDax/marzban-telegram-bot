@@ -167,6 +167,11 @@ jobs:
           echo "tag=${TAG}" >> $GITHUB_OUTPUT
           echo "Testing with tag: ${TAG}"
 
+      - name: Install PostgreSQL client
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
+
       - name: Run smoke test
         run: |
           chmod +x tests/smoke-test.sh
@@ -199,14 +204,14 @@ jobs:
           cd gitops
           NEW_VERSION="v${{ needs.semantic-release.outputs.new_release_version }}"
 
-          # Update values/marzban-bot-values-safe.yaml
-          sed -i "s|tag:.*|tag: ${NEW_VERSION}|g" values/marzban-bot-values-safe.yaml
+          # Update values/bot-values-safe.yaml (correct filename)
+          sed -i "s|tag:.*|tag: \"${NEW_VERSION}\"|g" values/bot-values-safe.yaml
 
           # Show changes
-          git diff values/marzban-bot-values-safe.yaml
+          git diff values/bot-values-safe.yaml
 
           # Commit and push
-          git add values/marzban-bot-values-safe.yaml
+          git add values/bot-values-safe.yaml
           git commit -m "chore: update bot image to ${NEW_VERSION}" \
                      -m "Automated update from GitHub Actions" \
                      -m "Source: https://github.com/GezzyDax/marzban-telegram-bot/releases/tag/${NEW_VERSION}" || echo "No changes to commit"

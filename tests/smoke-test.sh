@@ -19,17 +19,31 @@ cleanup() {
 # Set trap to cleanup on exit
 trap cleanup EXIT
 
+# Wait for PostgreSQL to be ready
+echo "⏳ Waiting for PostgreSQL to be ready..."
+for i in {1..30}; do
+    if pg_isready -h localhost -p 5432 -U test > /dev/null 2>&1; then
+        echo "✅ PostgreSQL is ready"
+        break
+    fi
+    if [ $i -eq 30 ]; then
+        echo "❌ PostgreSQL failed to start in time"
+        exit 1
+    fi
+    sleep 1
+done
+
 # Start container
 echo "🚀 Starting container..."
 docker run -d \
     --name ${CONTAINER_NAME} \
-    -e DATABASE_URL="postgresql+asyncpg://test:test@postgres:5432/test" \
+    -e DATABASE_URL="postgresql+asyncpg://test:test@host.docker.internal:5432/test" \
     -e TELEGRAM_BOT_TOKEN="test:token" \
     -e TELEGRAM_ADMIN_IDS="12345" \
     -e MARZBAN_API_URL="http://test" \
     -e MARZBAN_ADMIN_USERNAME="test" \
     -e MARZBAN_ADMIN_PASSWORD="test" \
-    --network=host \
+    --add-host=host.docker.internal:host-gateway \
     harbor.gezzy.ru/apps/marzban-telegram-bot:${IMAGE_TAG}
 
 # Wait for container to start
