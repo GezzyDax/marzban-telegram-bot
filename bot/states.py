@@ -50,3 +50,9 @@ class UserFeedbackStates(StatesGroup):
     """States for user feedback/support"""
 
     waiting_for_message = State()  # Waiting for problem description
+
+
+class ToggleUserStatusStates(StatesGroup):
+    """States for toggling user status (active <-> disabled)"""
+
+    confirmation = State()  # Confirmation before changing status
