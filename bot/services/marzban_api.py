@@ -188,6 +188,84 @@ class MarzbanAPI:
                     links=data.get("links", []),
                 )
 
+    async def modify_user(
+        self,
+        username: str,
+        status: Optional[str] = None,
+        data_limit: Optional[int] = None,
+        expire: Optional[int] = None,
+    ) -> MarzbanUser:
+        """Modify existing user in Marzban
+
+        Args:
+            username: Username to modify
+            status: User status (active/disabled/limited/expired/on_hold)
+            data_limit: Data limit in bytes (None = keep current)
+            expire: Expiry timestamp (None = keep current)
+
+        Returns:
+            MarzbanUser object with updated user data
+        """
+        # First get current user data
+        current_user = await self.get_user(username)
+
+        token = await self._get_token()
+        headers = {
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "application/json"
+        }
+
+        # Build payload with current values and modifications
+        payload = {
+            "username": username,
+            "status": status if status is not None else current_user.status,
+            "data_limit": data_limit if data_limit is not None else current_user.data_limit or 0,
+            "data_limit_reset_strategy": "no_reset",
+        }
+
+        # Handle expire
+        if expire is not None:
+            payload["expire"] = expire
+        elif current_user.expire:
+            payload["expire"] = int(current_user.expire.timestamp())
+        else:
+            payload["expire"] = 0
+
+        logger.info(f"Modifying user {username} with payload: {payload}")
+
+        async with aiohttp.ClientSession() as session:
+            async with session.put(
+                f"{self.base_url}/api/user/{username}",
+                headers=headers,
+                json=payload
+            ) as response:
+                if response.status == 404:
+                    raise MarzbanAPIError(f"User {username} not found in Marzban")
+                if response.status != 200:
+                    error_text = await response.text()
+                    raise MarzbanAPIError(f"Failed to modify user: {response.status} - {error_text}")
+
+                data = await response.json()
+                logger.info(f"Modified user {username} in Marzban")
+
+                # Parse expire date
+                expire_dt = None
+                if data.get("expire"):
+                    try:
+                        expire_dt = datetime.fromtimestamp(data["expire"])
+                    except (ValueError, TypeError):
+                        logger.warning(f"Failed to parse expire date: {data.get('expire')}")
+
+                return MarzbanUser(
+                    username=data["username"],
+                    status=data.get("status", "active"),
+                    used_traffic=data.get("used_traffic", 0),
+                    data_limit=data.get("data_limit"),
+                    expire=expire_dt,
+                    subscription_url=data.get("subscription_url", ""),
+                    links=data.get("links", []),
+                )
+
     async def check_connection(self) -> bool:
         """Check if Marzban API is accessible"""
         try:
