@@ -144,12 +144,16 @@ class MarzbanAPI:
             inbounds = available_inbounds
             logger.info(f"Using all available inbounds for user {username}: {inbounds}")
 
+        # Create proxies dict with empty settings for each protocol
+        proxies = {protocol: {} for protocol in inbounds.keys()}
+
         payload = {
             "username": username,
             "status": status,
             "data_limit": data_limit if data_limit is not None else 0,  # 0 = unlimited
             "data_limit_reset_strategy": "no_reset",
             "expire": expire if expire is not None else 0,  # 0 = unlimited
+            "proxies": proxies,
             "inbounds": inbounds,
         }
 
