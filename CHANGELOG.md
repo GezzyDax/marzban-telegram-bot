@@ -1,3 +1,9 @@
+## [1.1.0](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.4...v1.1.0) (2025-10-05)
+
+### Features
+
+* add 'About Bot' button to admin menu ([5d88743](https://github.com/GezzyDax/marzban-telegram-bot/commit/5d88743b1501462d036a76d33b2736d625217cd1))
+
 ## [1.0.4](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.3...v1.0.4) (2025-10-05)
 
 ### Bug Fixes
