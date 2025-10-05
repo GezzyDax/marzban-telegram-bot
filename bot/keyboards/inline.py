@@ -39,6 +39,9 @@ def get_admin_main_menu() -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📊 Статистика", callback_data="admin_stats"),
         ],
         [
+            InlineKeyboardButton(text="ℹ️ О боте", callback_data="admin_about"),
+        ],
+        [
             InlineKeyboardButton(text="👤 Вернуться в аккаунт", callback_data="back_to_user_menu"),
         ],
     ]
