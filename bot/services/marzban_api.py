@@ -39,6 +39,7 @@ class MarzbanAPI:
         self.password = password
         self.token: Optional[str] = None
         self.token_expires: Optional[datetime] = None
+        self._inbounds_cache: Optional[dict[str, list[str]]] = None
 
     async def _get_token(self) -> str:
         """Get access token (with caching)"""
@@ -137,9 +138,11 @@ class MarzbanAPI:
             "Content-Type": "application/json"
         }
 
-        # Default inbounds if not specified (empty = use all available)
-        if inbounds is None:
-            inbounds = {}
+        # Get all available inbounds if not specified
+        if inbounds is None or not inbounds:
+            available_inbounds = await self.get_inbounds()
+            inbounds = available_inbounds
+            logger.info(f"Using all available inbounds for user {username}: {inbounds}")
 
         payload = {
             "username": username,
@@ -265,6 +268,37 @@ class MarzbanAPI:
                     subscription_url=data.get("subscription_url", ""),
                     links=data.get("links", []),
                 )
+
+    async def get_inbounds(self) -> dict[str, list[str]]:
+        """Get available inbounds from Marzban
+
+        Returns:
+            Dictionary mapping protocol to list of inbound tags
+            Example: {"vless": ["VLESS TCP REALITY"], "vmess": ["VMess WS"]}
+        """
+        # Return cached inbounds if available
+        if self._inbounds_cache is not None:
+            return self._inbounds_cache
+
+        token = await self._get_token()
+        headers = {"Authorization": f"Bearer {token}"}
+
+        async with aiohttp.ClientSession() as session:
+            async with session.get(f"{self.base_url}/api/inbounds", headers=headers) as response:
+                if response.status != 200:
+                    raise MarzbanAPIError(f"Failed to get inbounds: {response.status}")
+
+                data = await response.json()
+
+                # Convert to format {protocol: [tag1, tag2, ...]}
+                inbounds = {}
+                for protocol, inbound_list in data.items():
+                    inbounds[protocol] = [inbound["tag"] for inbound in inbound_list]
+
+                # Cache the result
+                self._inbounds_cache = inbounds
+                logger.info(f"Retrieved inbounds: {inbounds}")
+                return inbounds
 
     async def check_connection(self) -> bool:
         """Check if Marzban API is accessible"""
