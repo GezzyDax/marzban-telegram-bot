@@ -1,3 +1,9 @@
+## [1.0.4](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.3...v1.0.4) (2025-10-05)
+
+### Bug Fixes
+
+* auto-populate inbounds when creating Marzban users ([f0da3b2](https://github.com/GezzyDax/marzban-telegram-bot/commit/f0da3b2fca82dfbe4fc2ecd675391e4497c2f2b9))
+
 ## [1.0.3](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.2...v1.0.3) (2025-10-04)
 
 ### Bug Fixes
