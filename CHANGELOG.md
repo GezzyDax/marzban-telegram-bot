@@ -1,3 +1,9 @@
+## [1.1.1](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.1.0...v1.1.1) (2025-10-05)
+
+### Bug Fixes
+
+* add proxies field to user creation payload ([ab7621b](https://github.com/GezzyDax/marzban-telegram-bot/commit/ab7621b833f5f84a68f1120cea2b19b49c86d5ee))
+
 ## [1.1.0](https://github.com/GezzyDax/marzban-telegram-bot/compare/v1.0.4...v1.1.0) (2025-10-05)
 
 ### Features
